@@ -18,7 +18,7 @@ if 'temp_year' not in st.session_state:
     st.session_state['temp_year'] = ""
 
 # API 키 설정
-MY_API_KEY = "AIzaSyDPAnMLtsdYt4p4KSB5abOALQj7U3n22zk"
+MY_API_KEY = "AIzaSyAWC-FSWhDesqamS6dIMbxzxiVYX1-3piA"
 genai.configure(api_key=MY_API_KEY)
 model = genai.GenerativeModel('gemini-2.5-flash')
 
@@ -97,3 +97,4 @@ if len(st.session_state['book_list']) > 0:
         file_name="my_books.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
+
