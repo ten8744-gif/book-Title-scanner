@@ -33,7 +33,7 @@ if 'book_list' not in st.session_state:
     st.session_state['book_list'] = []
 
 # 🚨 여기에 새로 발급받은 API 키를 넣으세요!
-MY_API_KEY = "AIzaSyAWC-FSWhDesqamS6dIMbxzxiVYX1-3piA"
+MY_API_KEY = "AIzaSyC_LJPdkV2U5ZaEQzh8pfm3TeehlKweVuU"
 
 st.set_page_config(page_title="스마트 책장 스캐너", layout="centered")
 st.title("📱 스마트 책장 스캐너 (안전 버전)")
@@ -99,3 +99,4 @@ if st.session_state['book_list']:
     )
 else:
     st.write("아직 저장된 항목이 없습니다.")
+
