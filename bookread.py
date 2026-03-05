@@ -5,12 +5,27 @@ from PIL import Image
 import io
 import json
 import hashlib
+import os
+
+# --- 데이터베이스 파일 설정 (데이터 영구 저장용) ---
+DB_FILE = "user_data.json"
+
+def load_db():
+    if os.path.exists(DB_FILE):
+        with open(DB_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+def save_db(data):
+    with open(DB_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=4)
 
 # --- 1. 설정 및 상태 관리 ---
 st.set_page_config(page_title="스마트 책 스캐너", layout="centered")
 
+# 세션 상태 초기화 (JSON 파일에서 데이터를 읽어옵니다)
 if 'user_db' not in st.session_state:
-    st.session_state['user_db'] = {} # {user_id: [book_list]}
+    st.session_state['user_db'] = load_db()
 if 'user_key' not in st.session_state:
     st.session_state['user_key'] = ""
 
@@ -48,7 +63,6 @@ def open_api_settings():
 # --- 3. 메인 화면 구성 ---
 st.title("📚 개인 맞춤 책장 스캐너")
 
-# 키가 없으면 팝업 열기 버튼 노출
 if not st.session_state['user_key']:
     st.info("시작하려면 아래 버튼을 눌러 API 키를 설정해주세요.")
     if st.button("🔑 API 키 입력하기", use_container_width=True):
@@ -58,7 +72,6 @@ else:
     if st.sidebar.button("⚙️ API 키 변경"):
         open_api_settings()
 
-# 사용자 ID 생성 (키 해시값)
 user_id = hashlib.sha256(st.session_state['user_key'].encode()).hexdigest()
 if user_id not in st.session_state['user_db']:
     st.session_state['user_db'][user_id] = []
@@ -88,6 +101,8 @@ if picture:
                     "책 제목": title_input,
                     "출판 년도": year_input
                 })
+                # 💡 데이터를 추가할 때마다 JSON 파일에 즉시 저장합니다.
+                save_db(st.session_state['user_db']) 
                 st.success(f"✅ 저장 완료!")
                 
     except Exception as e:
@@ -97,34 +112,48 @@ if picture:
 st.divider()
 st.subheader("📝 나의 저장 목록")
 
-user_list = st.session_state['user_db'][user_id]
+user_list = st.session_state['user_db'].get(user_id, [])
 
 if user_list:
     df = pd.DataFrame(user_list)
     
-    # 삭제 기능을 위한 데이터프레임 편집기 (체크박스 포함)
+    # 연번 컬럼 1번부터 생성
+    df.index = df.index + 1
+    df.reset_index(inplace=True)
+    df.rename(columns={'index': '연번'}, inplace=True)
+    
+    # 💡 우측 끝에 체크박스 전용 컬럼 추가
+    df['삭제 선택'] = False
+    
+    # 데이터 에디터 UI 설정
     edited_df = st.data_editor(
         df,
-        column_config={"num": st.column_config.CheckboxColumn(default=False)},
-        disabled=["책 제목", "출판 년도"],
+        column_config={
+            "연번": st.column_config.NumberColumn(disabled=True),
+            "책 제목": st.column_config.TextColumn(disabled=True),
+            "출판 년도": st.column_config.TextColumn(disabled=True),
+            "삭제 선택": st.column_config.CheckboxColumn("삭제 선택", default=False)
+        },
+        hide_index=True,
         use_container_width=True,
-        key="editor"
+        key="data_editor"
     )
 
-    # 삭제 버튼 로직
-    # 스트림릿의 데이터 에디터는 삭제 기능을 내장하고 있어, 
-    # 사용자가 행을 선택하고 'Delete' 키를 누르거나 편집기 메뉴를 사용하도록 가이드하거나,
-    # 아래처럼 직접 삭제 버튼을 구현할 수 있습니다.
-    
+    # 삭제 버튼 처리
     if st.button("🗑️ 선택 항목 삭제", type="primary", use_container_width=True):
-        # 편집된 데이터가 원본과 다를 경우 갱신 (스트림릿 에디터 자체 삭제 기능 활용)
-        st.session_state['user_db'][user_id] = edited_df.to_dict('records')
+        # 삭제 선택이 안 된(False) 데이터만 걸러서 새 리스트로 만듭니다.
+        rows_to_keep = edited_df[edited_df['삭제 선택'] == False]
+        new_list = rows_to_keep[['책 제목', '출판 년도']].to_dict('records')
+        
+        # 세션과 파일 모두 업데이트
+        st.session_state['user_db'][user_id] = new_list
+        save_db(st.session_state['user_db']) 
         st.rerun()
 
-    # 6. 엑셀 다운로드
+    # 6. 엑셀 다운로드 (엑셀에는 연번과 체크박스 빼고 깔끔하게 원본만)
     excel_buffer = io.BytesIO()
     with pd.ExcelWriter(excel_buffer, engine='xlsxwriter') as writer:
-        df.to_excel(writer, index=False)
+        pd.DataFrame(user_list).to_excel(writer, index=False)
     st.download_button("📥 전체 목록 엑셀 다운로드", data=excel_buffer.getvalue(), file_name="my_books.xlsx", use_container_width=True)
 else:
     st.info("아직 저장된 책이 없습니다.")
