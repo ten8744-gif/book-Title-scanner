@@ -3,6 +3,5 @@ pandas
 google-generativeai
 Pillow
 openpyxl
-
 xlsxwriter
 pytesseract
