@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from PIL import Image
+from PIL import Image, ExifTags  # 💡 폰의 사진 메모(EXIF)를 읽기 위해 추가
 import io
 import json
 import os
@@ -20,6 +20,30 @@ def save_db(data):
     with open(DB_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
 
+# 💡 [새로 추가] 사진의 숨겨진 메모(EXIF)를 읽어 똑바로 세워주는 함수
+def correct_orientation(image):
+    try:
+        # EXIF 정보 가져오기
+        exif = image._getexif()
+        
+        # '회전 정보'에 해당하는 태그 ID 찾기
+        orientation_tag = next(k for k, v in ExifTags.TAGS.items() if v == 'Orientation')
+        
+        if exif and orientation_tag in exif:
+            orientation = exif[orientation_tag]
+            
+            # 회전 정보에 따라 사진을 돌려줍니다.
+            if orientation == 3: # 180도 회전
+                image = image.rotate(180, expand=True)
+            elif orientation == 6: # 시계 방향 90도 회전 -> 원상복구
+                image = image.rotate(270, expand=True)
+            elif orientation == 8: # 반시계 방향 90도 회전 -> 원상복구
+                image = image.rotate(90, expand=True)
+    except (AttributeError, KeyError, IndexError, StopIteration):
+        # 정보가 없거나 꼬이면 그냥 둡니다.
+        pass
+    return image
+
 # --- 1. 화면 설정 및 초기화 ---
 st.set_page_config(page_title="무제한 책 스캐너 (OCR)", layout="centered")
 
@@ -29,9 +53,8 @@ if 'uploader_key' not in st.session_state:
     st.session_state['uploader_key'] = 0
 
 st.title("📚 무제한 책 스캐너 (OCR 버전)")
-st.info("💡 구글 API 없이 작동하여 횟수 제한이 없습니다. (단, 제목은 직접 다듬어주셔야 합니다.)")
+st.info("💡 폰을 세워서 찍어도 앱이 알아서 똑바로 세워 인식합니다!")
 
-# 💡 API 키 대신 '닉네임'으로 개인 목록 분리!
 user_id = st.sidebar.text_input("👤 사용자 닉네임 (목록 분리용)", value="", placeholder="예: 홍길동")
 
 if not user_id:
@@ -49,26 +72,37 @@ picture = st.file_uploader(
 )
 
 if picture:
-    st.image(picture, caption="현재 촬영된 사진", use_container_width=True)
+    raw_image = Image.open(picture)
+    
+    # 💡 폰의 세로 촬영 메모를 읽어 사진을 똑바로 세우기!
+    image = correct_orientation(raw_image)
+    
+    # 똑바로 선 사진을 화면에 보여주기
+    st.image(image, caption="현재 촬영된 사진", use_container_width=True)
     
     try:
-        with st.spinner('🔍 돋보기로 글자를 찾는 중... (3~5초 소요)'):
-            image = Image.open(picture)
-            # OCR 엔진 가동 (한국어+영어)
-            extracted_text = pytesseract.image_to_string(image, lang='kor+eng')
+        with st.spinner('🔍 돋보기로 글자를 찾는 중...'):
+            # OCR 인식률을 높이기 위한 이미지 흑백 변환
+            gray_image = image.convert('L')
+            
+            extracted_text = pytesseract.image_to_string(gray_image, lang='kor+eng')
             clean_text = extracted_text.strip()
             
-            # 야매(?) AI: 정규식으로 4자리 숫자(년도) 찾기
             year_match = re.search(r'(19|20)\d{2}', clean_text)
             guessed_year = year_match.group() if year_match else ""
             
-            # 제목은 보통 맨 첫 줄에 있을 확률이 높음
             lines = [line.strip() for line in clean_text.split('\n') if line.strip()]
             guessed_title = lines[0] if lines else ""
 
         with st.form(key="confirm_form"):
             st.write("### 📝 추출된 전체 글자 (참고용)")
-            st.text_area("복사해서 아래 제목 칸에 붙여넣으세요", value=clean_text, height=120, disabled=True)
+            st.caption("우측 상단의 복사 버튼(📋)을 누르면 한 번에 복사됩니다.")
+            
+            # 원클릭 복사 기능
+            if clean_text:
+                st.code(clean_text, language="text")
+            else:
+                st.info("글자를 인식하지 못했습니다. 밝은 곳에서 다시 찍어주세요.")
             
             st.write("### 🎯 데이터 입력 (직접 수정)")
             title_input = st.text_input("책 제목", value=guessed_title)
@@ -81,16 +115,16 @@ if picture:
                 })
                 save_db(st.session_state['user_db']) 
                 
-                # 초기화
                 st.session_state['uploader_key'] += 1
                 st.success("✅ 저장 완료!")
                 st.rerun()
                 
     except Exception as e:
-        st.error("앗! 글자를 읽어오는 데 실패했습니다. 서버 설치가 덜 되었을 수 있습니다.")
+        st.error("앗! 글자를 읽어오는 데 실패했습니다.")
         st.write(e)
 
-# --- 3. 목록 표시 및 삭제 기능 ---
+# ... (목록 표시 및 삭제 기능은 동일) ...
+# (코드가 너무 길어져 중간 생략: 기존 코드와 동일합니다)
 st.divider()
 st.subheader(f"📝 {user_id}님의 저장 목록")
 
