@@ -23,11 +23,16 @@ def save_db(data):
 # --- 1. 설정 및 상태 관리 ---
 st.set_page_config(page_title="스마트 책 스캐너 V2", layout="centered")
 
+# 세션 상태 초기화
 if 'user_db' not in st.session_state:
     st.session_state['user_db'] = load_db()
 if 'user_key' not in st.session_state:
     st.session_state['user_key'] = ""
+# 💡 파일 업로더 초기화를 위한 고유 키(카운터) 설정
+if 'uploader_key' not in st.session_state:
+    st.session_state['uploader_key'] = 0
 
+# AI 호출 함수 (캐싱 적용: 동일한 사진 중복 호출 방지)
 @st.cache_data(show_spinner=False)
 def ask_gemini_cached(image_bytes, api_key):
     genai.configure(api_key=api_key)
@@ -74,10 +79,17 @@ user_id = hashlib.sha256(st.session_state['user_key'].encode()).hexdigest()
 if user_id not in st.session_state['user_db']:
     st.session_state['user_db'][user_id] = []
 
-# --- 4. 사진 촬영 및 분석 (안드로이드 호환 방식으로 변경) ---
-picture = st.file_uploader("📸 버튼을 눌러 카메라로 찍거나 앨범에서 선택하세요", type=['png', 'jpg', 'jpeg'])
+# --- 4. 사진 촬영 및 분석 (동적 Key 적용으로 초기화 가능) ---
+picture = st.file_uploader(
+    "📸 버튼을 눌러 카메라로 찍거나 앨범에서 선택하세요", 
+    type=['png', 'jpg', 'jpeg'],
+    key=f"file_uploader_{st.session_state['uploader_key']}"  # 💡 이 번호가 바뀌면 업로더가 초기화됨
+)
 
 if picture:
+    # 💡 1. 촬영한 사진을 화면에 보여주기
+    st.image(picture, caption="현재 촬영된 사진", use_container_width=True)
+
     pic_bytes = picture.getvalue()
     current_hash = hashlib.md5(pic_bytes).hexdigest()
     
@@ -85,6 +97,7 @@ if picture:
         with st.spinner('AI 분석 중...'):
             result = ask_gemini_cached(pic_bytes, st.session_state['user_key'])
             
+        # 사진이 새로 들어왔을 때만 임시 변수 업데이트
         if st.session_state.get('last_hash') != current_hash:
             st.session_state['temp_title'] = result.get("title", "")
             st.session_state['temp_year'] = result.get("year", "")
@@ -95,12 +108,21 @@ if picture:
             year_input = st.text_input("년도 확인", value=st.session_state.get('temp_year', ""))
             
             if st.form_submit_button("내 목록에 저장", use_container_width=True):
+                # DB 저장
                 st.session_state['user_db'][user_id].append({
                     "책 제목": title_input,
                     "출판 년도": year_input
                 })
                 save_db(st.session_state['user_db']) 
+                
+                # 💡 2. 초기화 로직: 텍스트 칸과 사진 입력창을 비워줌
+                st.session_state['temp_title'] = ""
+                st.session_state['temp_year'] = ""
+                st.session_state['last_hash'] = ""
+                st.session_state['uploader_key'] += 1  # Key 숫자를 올려서 uploader 리셋
+                
                 st.success(f"✅ 저장 완료!")
+                st.rerun()  # 화면을 새로고침하여 초기화 상태를 즉시 반영
                 
     except Exception as e:
         st.error(f"오류 발생: {e}\nAPI 키를 다시 확인해주세요.")
